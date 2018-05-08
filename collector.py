@@ -1,77 +1,36 @@
 import socket
-import struct
-from ctypes import *
+from lib.lib import IP, UDP
 import yaml
 import sys
 import argparse
 import threading
 import logging
+import pika
 
 
-class IP(Structure):
-    _fields_ = [
-        ("ihl", c_ubyte, 4),
-        ("version", c_ubyte, 4),
-        ("tos", c_ubyte),
-        ("len", c_ushort),
-        ("id", c_ushort),
-        ("flags", c_ushort),
-        ("ttl", c_ubyte),
-        ("protocol_num", c_ubyte),
-        ("sum", c_ushort),
-        ("src", c_ulong),
-        ("dst", c_ulong)
-    ]
+def process_data(data, udp_ip, queue_ip, logger):
 
-    def __new__(self, socket_buffer=None):
-        return self.from_buffer_copy(socket_buffer)
+    # Create connection to Queue Server
+    conn = pika.BlockingConnection(pika.ConnectionParameters(queue_ip))
+    channel = conn.channel()
 
-    def __init__(self, socket_buffer=None):
+    # Define the queue
+    channel.queue_declare(queue='raw_msg_queue')
 
-        # map protocol constants to their names
-        self.protocol_map = {6: "TCP", 17: "UDP"}
-
-        # human readable IP addresses
-        self.src_address = socket.inet_ntoa(struct.pack("<L", self.src))
-        self.dst_address = socket.inet_ntoa(struct.pack("<L", self.dst))
-
-        # human readable protocol
-        try:
-            self.protocol = self.protocol_map[self.protocol_num]
-        except:
-            self.protocol = str(self.protocol_num)
-
-
-class UDP(Structure):
-    _fields_ = [
-        ("src", c_ushort),
-        ("dst", c_ushort),
-        ("len", c_ushort),
-        ("sum", c_ushort)
-    ]
-
-    def __new__(self, socket_buffer):
-        return self.from_buffer_copy(socket_buffer)
-
-    def __init__(self, socket_buffer):
-
-        # Conver from little endian to big endian the ports
-        self.src_port = struct.unpack(">H", struct.pack("<H", self.src))[0]
-        self.dst_port = struct.unpack(">H", struct.pack("<H", self.dst))[0]
-
-
-def process_data(data):
-
-    # Process Data
+    # Process IP Header
     ip_header = IP(data[0:20])
     if ip_header.protocol == 'UDP':
-       udp_header = UDP(data[20:28])
-       if udp_header.dst_port == 650:
-           print " ".join("%02x" % ord(i) for i in data)
-           print " ".join("%02x" % ord(i) for i in data[0:20])
-           print " ".join("%02x" % ord(i) for i in data[20:28])
-           print "Protocol: %s | %s:%s -> %s:%s" % (ip_header.protocol, ip_header.src_address, udp_header.src_port,
-                                                ip_header.dst_address, udp_header.dst_port)
+        # Process UDP Header
+        udp_header = UDP(data[20:28])
+        if (ip_header.dst_address == udp_ip) and (udp_header.dst_port == 650):
+            # print " ".join("%02x" % ord(i) for i in data)
+            # print " ".join("%02x" % ord(i) for i in data[0:20])
+            # print " ".join("%02x" % ord(i) for i in data[20:28])
+            channel.basic_publish(exchange='', routing_key='raw_msg_queue', body=data)
+            logger.info("**** Message sent to queue! | %s:%s -> %s:%s ****" % (ip_header.src_address,
+                                                                               udp_header.src_port,
+                                                                               ip_header.dst_address,
+                                                                               udp_header.dst_port))
 
 
 if __name__ == "__main__":
@@ -96,21 +55,24 @@ if __name__ == "__main__":
     with open('config.yaml', 'r') as f:
         config = yaml.load(f)
 
+    # Getting the Queue server Ip address
+    queue_ip = config["queue_server"]["ip"]
+
     # Determining the ip, port and receiving buffer for the collector
     try:
-        udp_ip = config["collector_server"]["udp_ip"]
+        udp_ip = config["collector_server"]["ip"]
     except:
         logger.critical("**** You should specify the UDP ip address to be used for the collector ****")
         sys.exit(1)
 
     try:
-        udp_port = config["collector_server"]["udp_port"]
+        udp_port = config["collector_server"]["port"]
     except:
         logger.critical("**** You should specify the UDP port to be used for the collector ****")
         sys.exit(1)
 
     try:
-        udp_buffer = config["collector_server"]["udp_buffer"]
+        udp_buffer = config["collector_server"]["buffer"]
     except:
         udp_buffer = 4096
 
@@ -130,6 +92,6 @@ if __name__ == "__main__":
     while True:
         data, addr = server_socket.recvfrom(udp_buffer)
         logger.info("Connection received form %s, the socket was dispatched to the thread" % addr[0])
-        t = threading.Thread(target=process_data, args=(data,))
+        t = threading.Thread(target=process_data, args=(data, udp_ip, queue_ip, logger))
         t.start()
 

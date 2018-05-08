@@ -5,6 +5,10 @@ general:
 
 # Collector Server Configuration
 collector_server:
-  udp_ip: 192.168.10.103
-  udp_port: 650
-  udp_buffer: 4096
+  ip: 192.168.10.103
+  port: 650
+  buffer: 4096
+
+# Queue Server Configuration
+queue_server:
+  ip: 192.168.10.176
