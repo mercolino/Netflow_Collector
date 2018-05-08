@@ -2,6 +2,9 @@
 
 # General Configuration Variables
 general:
+  log:
+    # Possible values for level: debug, info, warning, error, critical
+    level: info
 
 # Collector Server Configuration
 collector_server:
@@ -12,3 +15,7 @@ collector_server:
 # Queue Server Configuration
 queue_server:
   ip: 192.168.10.176
+  port: 5672
+  username: netflow
+  password: netflow
+  virtual_host: /

@@ -1,5 +1,6 @@
 import struct
 from ctypes import *
+import socket
 
 class IP(Structure):
     _fields_ = [
