@@ -1,0 +1,10 @@
+# Configuration File
+
+# General Configuration Variables
+general:
+
+# Collector Server Configuration
+collector_server:
+  udp_ip: 192.168.10.103
+  udp_port: 650
+  udp_buffer: 4096
