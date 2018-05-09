@@ -2,9 +2,16 @@
 
 # General Configuration Variables
 general:
-  log:
-    # Possible values for level: debug, info, warning, error, critical
-    level: info
+  collector:
+    log:
+      # Possible values for level: debug, info, warning, error, critical
+      level: info
+  parser:
+    log:
+      # Possible values for level: debug, info, warning, error, critical
+      level: info
+    # Number of threads for the parser
+    threads: 5
 
 # Collector Server Configuration
 collector_server:

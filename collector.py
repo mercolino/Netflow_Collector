@@ -21,10 +21,6 @@ def process_data(data, udp_ip, queue_ip, queue_port, username, password, queue_v
         # Process UDP Header
         udp_header = UDP(data[20:28])
         if (ip_header.dst_address == udp_ip) and (udp_header.dst_port == 650):
-            # print " ".join("%02x" % ord(i) for i in data)
-            # print " ".join("%02x" % ord(i) for i in data[0:20])
-            # print " ".join("%02x" % ord(i) for i in data[20:28])
-
             # Set Up credentials to connect to queue server
             credentials = pika.PlainCredentials(username, password)
             # Create connection to Queue Server
@@ -57,7 +53,7 @@ if __name__ == "__main__":
 
     # Set the logging level
     try:
-        log_level = LEVEL[config["general"]["log"]["level"]]
+        log_level = LEVEL[config["general"]["collector"]["log"]["level"]]
     except:
         log_level = logging.INFO
 
@@ -78,11 +74,15 @@ if __name__ == "__main__":
 
 
     # Getting the Queue server Info
-    queue_ip = config["queue_server"]["ip"]
-    queue_port = config["queue_server"]["port"]
-    queue_username = config["queue_server"]["username"]
-    queue_password = config["queue_server"]["password"]
-    queue_virtual_host = config["queue_server"]["virtual_host"]
+    try:
+        queue_ip = config["queue_server"]["ip"]
+        queue_port = config["queue_server"]["port"]
+        queue_username = config["queue_server"]["username"]
+        queue_password = config["queue_server"]["password"]
+        queue_virtual_host = config["queue_server"]["virtual_host"]
+    except:
+        logger.critical("**** You should specify, the queue server ip, port, virtual host, username and password ****")
+        sys.exit(1)
 
     # Determining the ip, port and receiving buffer for the collector
     try:
