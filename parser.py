@@ -1,5 +1,5 @@
 import pika
-from lib.lib import IP, UDP
+from lib.lib import IP, UDP, NETFLOW, FLOWSET, DATA_TEMPLATE
 import yaml
 import argparse
 import sys
@@ -15,17 +15,59 @@ LEVEL = {'debug': logging.DEBUG,
 
 
 def parse_packet(ch, method, properties, body, logger):
-    # Process IP Header
+
+    logger.info("**** Message retrieved from the queue on thread %s!****" % (threading.currentThread().getName()))
+
+    # Process IP Header 20 bytes
     ip_header = IP(body[0:20])
-    # Process UDP Header
+    # Process UDP Header 8 bytes
     udp_header = UDP(body[20:28])
+    # Process Netflow Header 20 bytes
+    netflow_header = NETFLOW(body[28:48])
+
+    # Check the version of the netflow data
+    if netflow_header.version == 9:
+        # Process Flowset header and determine type of netflow packet data-template, option-template or data
+        flowset_header = FLOWSET(body[48:52])
+        if flowset_header.id == 0:
+            data_template_header = DATA_TEMPLATE(body[52:56])
+            logger.info("**** Data-Template Netflow packet version %i from %s:%s to %s:%s with template id %i with %i fields****" %
+                        (netflow_header.version,
+                         ip_header.src_address,
+                         udp_header.src_port,
+                         ip_header.dst_address,
+                         udp_header.dst_port,
+                         data_template_header.id,
+                         data_template_header.field_count))
+        elif flowset_header.id == 1:
+            logger.info("**** Options-Template Netflow packet version %i from %s:%s to %s:%s with %i flows ****" %
+                        (netflow_header.version,
+                         ip_header.src_address,
+                         udp_header.src_port,
+                         ip_header.dst_address,
+                         udp_header.dst_port,
+                         netflow_header.count))
+        elif flowset_header.id > 255:
+            logger.info("**** Data Netflow packet version %i from %s:%s to %s:%s with %i flows "
+                        "to be decoded by template %i ****" %
+                        (netflow_header.version,
+                         ip_header.src_address,
+                         udp_header.src_port,
+                         ip_header.dst_address,
+                         udp_header.dst_port,
+                         netflow_header.count,
+                         flowset_header.id))
+        else:
+            logger.info("**** Unknown Netflow packet version %i from %s:%s to %s:%s with %i flows ****" %
+                        (netflow_header.version,
+                         ip_header.src_address,
+                         udp_header.src_port,
+                         ip_header.dst_address,
+                         udp_header.dst_port,
+                         netflow_header.count))
+
     print " ".join("%02x" % ord(i) for i in body)
-    logger.info("**** Message retrieved from the queue on thread %s! | %s:%s -> %s:%s ****" %
-                (threading.currentThread().getName(),
-                 ip_header.src_address,
-                 udp_header.src_port,
-                 ip_header.dst_address,
-                 udp_header.dst_port))
+
 
 
 def threaded_parser(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger):

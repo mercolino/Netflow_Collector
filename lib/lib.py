@@ -2,6 +2,7 @@ import struct
 from ctypes import *
 import socket
 
+
 class IP(Structure):
     _fields_ = [
         ("ihl", c_ubyte, 4),
@@ -49,6 +50,62 @@ class UDP(Structure):
 
     def __init__(self, socket_buffer):
 
-        # Conver from little endian to big endian the ports
+        # Convert from little endian to big endian the ports
         self.src_port = struct.unpack(">H", struct.pack("<H", self.src))[0]
         self.dst_port = struct.unpack(">H", struct.pack("<H", self.dst))[0]
+
+
+class NETFLOW(Structure):
+    _fields_ = [
+        ("version", c_ushort),
+        ("count", c_ushort),
+        ("sysuptime", c_ulong),
+        ("timestamp", c_ulong),
+        ("flow_sequence", c_ulong),
+        ("source_id", c_ulong)
+    ]
+
+    def __new__(self, socket_buffer=None):
+        return self.from_buffer_copy(socket_buffer)
+
+    def __init__(self, socket_buffer=None):
+
+        # Convert from little endian to big endian the ports
+        self.version = struct.unpack(">H", struct.pack("<H", self.version))[0]
+        self.count = struct.unpack(">H", struct.pack("<H", self.count))[0]
+        self.sysuptime = struct.unpack(">L", struct.pack("<L", self.sysuptime))[0]
+        self.timestamp = struct.unpack(">L", struct.pack("<L", self.timestamp))[0]
+        self.flow_sequence = struct.unpack(">L", struct.pack("<L", self.flow_sequence))[0]
+        self.source_id = struct.unpack(">L", struct.pack("<L", self.source_id))[0]
+
+
+class FLOWSET(Structure):
+    _fields_ = [
+        ("id", c_ushort),
+        ("length", c_ushort),
+    ]
+
+    def __new__(self, socket_buffer=None):
+        return self.from_buffer_copy(socket_buffer)
+
+    def __init__(self, socket_buffer=None):
+
+        # Convert from little endian to big endian the ports
+        self.id = struct.unpack(">H", struct.pack("<H", self.id))[0]
+        self.length = struct.unpack(">H", struct.pack("<H", self.length))[0]
+
+
+class DATA_TEMPLATE(Structure):
+    _fields_ = [
+        ("id", c_ushort),
+        ("field_count", c_ushort),
+    ]
+
+    def __new__(self, socket_buffer=None):
+        return self.from_buffer_copy(socket_buffer)
+
+    def __init__(self, socket_buffer=None):
+
+        # Convert from little endian to big endian the ports
+        self.id = struct.unpack(">H", struct.pack("<H", self.id))[0]
+        self.field_count = struct.unpack(">H", struct.pack("<H", self.field_count))[0]

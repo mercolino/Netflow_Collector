@@ -11,7 +11,7 @@ general:
       # Possible values for level: debug, info, warning, error, critical
       level: info
     # Number of threads for the parser
-    threads: 5
+    threads: 1
 
 # Collector Server Configuration
 collector_server:
