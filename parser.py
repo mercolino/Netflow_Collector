@@ -1,20 +1,17 @@
 import pika
-from lib.lib import IP, UDP, NETFLOW, FLOWSET, DATA_TEMPLATE
+from lib.lib import IP, UDP, Netflow, Flowset, DataTemplate, TemplateFields
+from lib.constants import LEVEL
 import yaml
 import argparse
 import sys
 import logging
 import functools
 import threading
-
-LEVEL = {'debug': logging.DEBUG,
-         'info': logging.INFO,
-         'warning': logging.WARNING,
-         'error': logging.ERROR,
-         'critical': logging.CRITICAL}
+import json
 
 
-def parse_packet(ch, method, properties, body, logger):
+def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, queue_virtual_host, queue_username,
+                 queue_password):
 
     logger.info("**** Message retrieved from the queue on thread %s!****" % (threading.currentThread().getName()))
 
@@ -23,14 +20,41 @@ def parse_packet(ch, method, properties, body, logger):
     # Process UDP Header 8 bytes
     udp_header = UDP(body[20:28])
     # Process Netflow Header 20 bytes
-    netflow_header = NETFLOW(body[28:48])
+    netflow_header = Netflow(body[28:48])
 
     # Check the version of the netflow data
     if netflow_header.version == 9:
         # Process Flowset header and determine type of netflow packet data-template, option-template or data
-        flowset_header = FLOWSET(body[48:52])
+        flowset_header = Flowset(body[48:52])
+        # Check that the netflow packet is a data-template
         if flowset_header.id == 0:
-            data_template_header = DATA_TEMPLATE(body[52:56])
+            # Process the data_template header to find id and field count
+            data_template_header = DataTemplate(body[52:56])
+            # Process the fields
+            template_fields = TemplateFields(body[56:])
+
+            # Adding template id and field count to the returning dictionary of the fields
+            data_template_doc = template_fields.decoded_fields
+            data_template_doc['netflow_device'] = ip_header.src_address
+            data_template_doc['id'] = data_template_header.id
+            data_template_doc['count'] = data_template_header.field_count
+
+            # Add data to template queue
+            # Set Up credentials to connect to queue server
+            credentials = pika.PlainCredentials(queue_username, queue_password)
+            # Create connection to Queue Server
+            conn = pika.BlockingConnection(
+                pika.ConnectionParameters(queue_ip, queue_port, queue_virtual_host, credentials))
+            channel = conn.channel()
+
+            # Define the queue
+            channel.queue_declare(queue='template_queue')
+
+            channel.basic_publish(exchange='', routing_key='template_queue', body=json.dumps(data_template_doc))
+
+            conn.close()
+
+            # Log info
             logger.info("**** Data-Template Netflow packet version %i from %s:%s to %s:%s with template id %i with %i fields****" %
                         (netflow_header.version,
                          ip_header.src_address,
@@ -39,6 +63,7 @@ def parse_packet(ch, method, properties, body, logger):
                          udp_header.dst_port,
                          data_template_header.id,
                          data_template_header.field_count))
+            # TODO: Send template document to a queue to be processed by the database module
         elif flowset_header.id == 1:
             logger.info("**** Options-Template Netflow packet version %i from %s:%s to %s:%s with %i flows ****" %
                         (netflow_header.version,
@@ -81,12 +106,17 @@ def threaded_parser(queue_ip, queue_port, queue_virtual_host, queue_username, qu
     channel.queue_declare(queue='raw_msg_queue')
 
     # Use functools to be able to pass user data to the callback function
-    custom_parse_packet = functools.partial(parse_packet, logger=logger)
+    custom_parse_packet = functools.partial(parse_packet, logger=logger,
+                                            queue_ip=queue_ip,
+                                            queue_port=queue_port,
+                                            queue_virtual_host=queue_virtual_host,
+                                            queue_username=queue_username,
+                                            queue_password=queue_password)
 
     # Create the consumer with the modified callback function
     channel.basic_consume(custom_parse_packet, queue='raw_msg_queue', no_ack=True)
 
-    logger.info("**** Starting to consume messages from the queue on thread %s! ****" % threading.currentThread().getName())
+    logger.info("**** Starting to consume messages from the queue Raw Msg on thread %s! ****" % threading.currentThread().getName())
 
     channel.start_consuming()
 
@@ -119,10 +149,7 @@ if __name__ == "__main__":
     logger.addHandler(handler)
 
     # Turn logger on or off depending on the arguments
-    if args.verbose:
-        logger.disabled = False
-    else:
-        logger.disabled = True
+    logger.disabled = not args.verbose
 
     try:
         queue_ip = config["queue_server"]["ip"]

@@ -1,5 +1,6 @@
 import socket
 from lib.lib import IP, UDP
+from lib.constants import LEVEL
 import yaml
 import sys
 import argparse
@@ -7,11 +8,6 @@ import threading
 import logging
 import pika
 
-LEVEL = {'debug': logging.DEBUG,
-         'info': logging.INFO,
-         'warning': logging.WARNING,
-         'error': logging.ERROR,
-         'critical': logging.CRITICAL}
 
 def process_data(data, udp_ip, queue_ip, queue_port, username, password, queue_virtual_host, logger):
 
@@ -67,11 +63,7 @@ if __name__ == "__main__":
     logger.addHandler(handler)
 
     # Turn logger on or off depending on the arguments
-    if args.verbose:
-        logger.disabled = False
-    else:
-        logger.disabled = True
-
+    logger.disabled = not args.verbose
 
     # Getting the Queue server Info
     try:

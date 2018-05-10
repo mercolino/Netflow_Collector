@@ -12,12 +12,18 @@ general:
       level: info
     # Number of threads for the parser
     threads: 1
+  db_mongo:
+    log:
+      # Possible values for level: debug, info, warning, error, critical
+      level: info
+    # Number of threads for the db_mongo
+    threads: 2
 
 # Collector Server Configuration
 collector_server:
   ip: 192.168.10.103
   port: 650
-  buffer: 4096
+  buffer: 655535
 
 # Queue Server Configuration
 queue_server:
@@ -26,3 +32,10 @@ queue_server:
   username: netflow
   password: netflow
   virtual_host: /
+
+# Mongo DB Configuration
+mongo_server:
+  ip: 192.168.10.176
+  port: 5672
+  username: netflow
+  password: netflow

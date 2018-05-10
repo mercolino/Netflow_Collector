@@ -1,6 +1,7 @@
 import struct
 from ctypes import *
 import socket
+import constants
 
 
 class IP(Structure):
@@ -55,7 +56,7 @@ class UDP(Structure):
         self.dst_port = struct.unpack(">H", struct.pack("<H", self.dst))[0]
 
 
-class NETFLOW(Structure):
+class Netflow(Structure):
     _fields_ = [
         ("version", c_ushort),
         ("count", c_ushort),
@@ -79,7 +80,7 @@ class NETFLOW(Structure):
         self.source_id = struct.unpack(">L", struct.pack("<L", self.source_id))[0]
 
 
-class FLOWSET(Structure):
+class Flowset(Structure):
     _fields_ = [
         ("id", c_ushort),
         ("length", c_ushort),
@@ -95,7 +96,7 @@ class FLOWSET(Structure):
         self.length = struct.unpack(">H", struct.pack("<H", self.length))[0]
 
 
-class DATA_TEMPLATE(Structure):
+class DataTemplate(Structure):
     _fields_ = [
         ("id", c_ushort),
         ("field_count", c_ushort),
@@ -109,3 +110,21 @@ class DATA_TEMPLATE(Structure):
         # Convert from little endian to big endian the ports
         self.id = struct.unpack(">H", struct.pack("<H", self.id))[0]
         self.field_count = struct.unpack(">H", struct.pack("<H", self.field_count))[0]
+
+
+class TemplateFields():
+
+    def __init__(self, buffer):
+        n = 4
+        fields_list = []
+        self.decoded_fields = {}
+        decoded_fields = {}
+        for i in range(0, len(buffer), n):
+            fields_list.append(buffer[i:i+n])
+        j = 0
+        for i in fields_list:
+            j += 1
+            decoded_fields['field_' + str(j)] = {'type': constants.FIELD_TYPE_MAP[struct.unpack(">HH", i)[0]],
+                                                      'length': struct.unpack(">HH", i)[1]}
+
+        self.decoded_fields['fields'] = decoded_fields
