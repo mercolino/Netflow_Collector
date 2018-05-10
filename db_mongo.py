@@ -10,18 +10,54 @@ import threading
 import functools
 
 
-def template_process(ch, method, properties, body, logger, queue_ip, queue_port, queue_virtual_host, queue_username,
-                 queue_password):
+def template_process(ch, method, properties, body, logger, mongo_ip, mongo_port, mongo_username, mongo_password,
+                     mongo_db):
 
+    # Converting json string into dict
     data = json.loads(body)
-    print "Template ID: %i" % data['id']
 
-    for i in range(1, data['count'] + 1):
-        print 'Field ' + str(i) + ': ' + data['fields']['field_' + str(i)]['type'] + ' with a length of ' + \
-              str(data['fields']['field_' + str(i)]['length']) + ' bytes'
+    logger.info("Received a Template with ID %i from netflow device %s" % (data['id'], data['netflow_device']))
+
+    #Connect to Mongo Database
+    try:
+        conn_string = "mongodb://" + mongo_username + ":" + mongo_password + "@" + mongo_ip + ":" + str(mongo_port)
+        conn = pymongo.MongoClient(conn_string)
+        logger.info("**** Connected to the Mongo Server %s on port %i ****" % (mongo_ip, mongo_port))
+    except pymongo.errors.ConnectionFailure, e:
+        logger.critical("**** Could not connect to the Mongo Server %s on port %i ****" % (mongo_ip, mongo_port))
+        logger.error("**** Error %s ****" % (e))
+
+    # Connect to the database
+    db = conn[mongo_db]
+
+    #Connect to the Collection
+    collection = db.templates
+
+    # Querying Db to see if the netflow device already have a template
+    query_netflow_device = collection.find({"netflow_device":data['netflow_device']}).count()
+
+    if query_netflow_device > 0:
+        # The Netflow device already have a template on the DB
+        # Checking if the template id alreadyexists, if it doses pass if not insert it
+        query_template_id = collection.find({"netflow_device":data['netflow_device'], "id":data['id']}).count()
+        logger.info("**** The netflow device %s already exist on the database ****" % (data['netflow_device']))
+        if query_template_id > 0:
+            logger.info("**** Template id %i already exist for netflow device %s, template not inserted on the DB****" % (data['id'], data['netflow_device']))
+            pass
+        else:
+            # Insert Template
+            collection.insert(data)
+            logger.info(
+                "**** Template id %i inserted on the DB for netflow device %s ****" % (data['id'], data['netflow_device']))
+    else:
+        # the netflow device does not have a template on the database, inserting the one received
+        collection.insert(data)
+        logger.info(
+            "**** Template id %i inserted on the DB for netflow device %s ****" % (data['id'], data['netflow_device']))
 
 
-def threaded_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger):
+def threaded_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger,
+                      mongo_ip, mongo_port, mongo_username, mongo_password, mongo_db):
     # Set Up credentials to connect to queue server
     credentials = pika.PlainCredentials(queue_username, queue_password)
     # Create connection to Queue Server
@@ -33,11 +69,11 @@ def threaded_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_username, 
 
     # Use functools to be able to pass user data to the callback function
     custom_template_process = functools.partial(template_process, logger=logger,
-                                            queue_ip=queue_ip,
-                                            queue_port=queue_port,
-                                            queue_virtual_host=queue_virtual_host,
-                                            queue_username=queue_username,
-                                            queue_password=queue_password)
+                                            mongo_ip=mongo_ip,
+                                            mongo_port=mongo_port,
+                                            mongo_username=mongo_username,
+                                            mongo_password=mongo_password,
+                                            mongo_db=mongo_db)
 
     # Create the consumer with the modified callback function
     channel.basic_consume(custom_template_process, queue='template_queue', no_ack=True)
@@ -78,7 +114,7 @@ if __name__ == "__main__":
     # Turn logger on or off depending on the arguments
     logger.disabled = not args.verbose
 
-
+    # Getting the Queue server Info
     try:
         queue_ip = config["queue_server"]["ip"]
         queue_port = config["queue_server"]["port"]
@@ -87,6 +123,17 @@ if __name__ == "__main__":
         queue_virtual_host = config["queue_server"]["virtual_host"]
     except:
         logger.critical("**** You should specify, the queue server ip, port, virtual host, username and password ****")
+        sys.exit(1)
+
+    # Getting the Database server Info
+    try:
+        mongo_ip = config["mongo_server"]["ip"]
+        mongo_port = config["mongo_server"]["port"]
+        mongo_username = config["mongo_server"]["username"]
+        mongo_password = config["mongo_server"]["password"]
+        mongo_db = config["mongo_server"]["db"]
+    except:
+        logger.critical("**** You should specify, the mongo database server ip, port, virtual host, username and password ****")
         sys.exit(1)
 
     # Get the number of threads configured
@@ -98,6 +145,7 @@ if __name__ == "__main__":
     threads = []
     for i in range(thread_number):
         t = threading.Thread(name="parser_" + str(i+1), target=threaded_mongo_db,
-                             args=(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger))
+                             args=(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger,
+                                   mongo_ip, mongo_port, mongo_username, mongo_password, mongo_db))
         threads.append(t)
         t.start()

@@ -151,6 +151,7 @@ if __name__ == "__main__":
     # Turn logger on or off depending on the arguments
     logger.disabled = not args.verbose
 
+    # Getting the Queue server Info
     try:
         queue_ip = config["queue_server"]["ip"]
         queue_port = config["queue_server"]["port"]
