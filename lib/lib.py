@@ -4,6 +4,7 @@ import socket
 import constants
 
 
+
 class IP(Structure):
     _fields_ = [
         ("ihl", c_ubyte, 4),
@@ -119,12 +120,58 @@ class TemplateFields():
         fields_list = []
         self.decoded_fields = {}
         decoded_fields = {}
+        # Divide buffer in 4 byte chunks
         for i in range(0, len(buffer), n):
             fields_list.append(buffer[i:i+n])
         j = 0
+        # Process the chunks and divide the type and length
         for i in fields_list:
             j += 1
             decoded_fields['field_' + str(j)] = {'type': constants.FIELD_TYPE_MAP[struct.unpack(">HH", i)[0]],
                                                       'length': struct.unpack(">HH", i)[1]}
+
+        self.decoded_fields['fields'] = decoded_fields
+
+
+class DataFlow():
+
+    def __init__(self, buffer, template):
+        def decode(bytes, field_type):
+            byte_list = []
+            word = ''
+
+            # Convert string to list of hex strings
+            for b in bytes:
+                byte_list.append(hex(ord(b)))
+
+            # Convert list to string without 0x
+            for b in byte_list:
+                if len(b[2:]) == 1:
+                    word = word + "0" + b[2:]
+                else:
+                    word = word + b[2:]
+
+            # Return the result
+            if field_type in constants.IPV4_FIELD:
+                return socket.inet_ntoa(struct.pack(">L", int(word, 16)))
+            elif field_type in ["TOS", "TCP_FLAGS"]:
+                return hex(int(word,16))
+            elif field_type == "PROTOCOL":
+                return constants.PROTOCOLS[int(word, 16)]
+            else:
+                return int(word, 16)
+
+        self.decoded_fields = {}
+        decoded_fields = {}
+        template_fields = {}
+        # Create a new dictionary only with the template fields, where the key is an integer so the sorting is easier
+        for key in template['fields']:
+            template_fields[int(key[6:])] = template['fields'][key]
+        # Process the Buffer wit the template
+        for key in sorted(template_fields):
+            new_key = template_fields[key]['type']
+            raw_value = buffer[:template_fields[key]['length']]
+            decoded_fields[key] = {new_key: decode(raw_value, new_key)}
+            buffer = buffer[template_fields[key]['length']:]
 
         self.decoded_fields['fields'] = decoded_fields

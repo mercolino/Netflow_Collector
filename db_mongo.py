@@ -10,6 +10,47 @@ import threading
 import functools
 
 
+class ReturnTemplate():
+
+    def __init__(self, netflow_device, template_id, source_id, logger):
+        # Load the config.yaml file
+        with open('config.yaml', 'r') as f:
+            config = yaml.load(f)
+
+        # Getting the Database server Info
+        try:
+            mongo_ip = config["mongo_server"]["ip"]
+            mongo_port = config["mongo_server"]["port"]
+            mongo_username = config["mongo_server"]["username"]
+            mongo_password = config["mongo_server"]["password"]
+            mongo_db = config["mongo_server"]["db"]
+        except:
+            logger.critical(
+                "**** You should specify, the mongo database server ip, port, virtual host, username and password ****")
+            sys.exit(1)
+
+        # Connect to Mongo Database
+        try:
+            conn_string = "mongodb://" + mongo_username + ":" + mongo_password + "@" + mongo_ip + ":" + str(mongo_port)
+            conn = pymongo.MongoClient(conn_string)
+            logger.info("**** Connected to the Mongo Server %s on port %i ****" % (mongo_ip, mongo_port))
+        except pymongo.errors.ConnectionFailure, e:
+            logger.critical("**** Could not connect to the Mongo Server %s on port %i ****" % (mongo_ip, mongo_port))
+            logger.error("**** Error %s ****" % (e))
+
+        # Connect to the database
+        db = conn[mongo_db]
+
+        # Connect to the Collection
+        collection = db.templates
+
+        # Querying Db to see if the netflow device already have a template
+        self.query_netflow_device = collection.find_one({"netflow_device": netflow_device, "source_id":source_id,
+                                                         "id": template_id})
+
+        conn.close()
+
+
 def template_process(ch, method, properties, body, logger, mongo_ip, mongo_port, mongo_username, mongo_password,
                      mongo_db):
 
@@ -34,12 +75,12 @@ def template_process(ch, method, properties, body, logger, mongo_ip, mongo_port,
     collection = db.templates
 
     # Querying Db to see if the netflow device already have a template
-    query_netflow_device = collection.find({"netflow_device":data['netflow_device']}).count()
+    query_netflow_device = collection.find({"netflow_device":data['netflow_device'], "source_id":data['source_id']}).count()
 
     if query_netflow_device > 0:
         # The Netflow device already have a template on the DB
         # Checking if the template id alreadyexists, if it doses pass if not insert it
-        query_template_id = collection.find({"netflow_device":data['netflow_device'], "id":data['id']}).count()
+        query_template_id = collection.find({"netflow_device":data['netflow_device'], "source_id":data['source_id'], "id":data['id']}).count()
         logger.info("**** The netflow device %s already exist on the database ****" % (data['netflow_device']))
         if query_template_id > 0:
             logger.info("**** Template id %i already exist for netflow device %s, template not inserted on the DB****" % (data['id'], data['netflow_device']))
@@ -55,8 +96,10 @@ def template_process(ch, method, properties, body, logger, mongo_ip, mongo_port,
         logger.info(
             "**** Template id %i inserted on the DB for netflow device %s ****" % (data['id'], data['netflow_device']))
 
+    conn.close()
 
-def threaded_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger,
+
+def threaded_templates_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger,
                       mongo_ip, mongo_port, mongo_username, mongo_password, mongo_db):
     # Set Up credentials to connect to queue server
     credentials = pika.PlainCredentials(queue_username, queue_password)
@@ -80,6 +123,66 @@ def threaded_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_username, 
 
     logger.info(
         "**** Starting to consume messages from the queue Template on thread %s! ****" % threading.currentThread().getName())
+
+    channel.start_consuming()
+
+
+def flows_process(ch, method, properties, body, logger, mongo_ip, mongo_port, mongo_username, mongo_password,
+                     mongo_db):
+
+    # TODO: identify flow and update the record, now all the dflows are recorded on the DB
+
+    # Converting json string into dict
+    data = json.loads(body)
+
+    logger.info("Received a flow with from netflow device %s" % (data['netflow_device']))
+
+    #Connect to Mongo Database
+    try:
+        conn_string = "mongodb://" + mongo_username + ":" + mongo_password + "@" + mongo_ip + ":" + str(mongo_port)
+        conn = pymongo.MongoClient(conn_string)
+        logger.info("**** Connected to the Mongo Server %s on port %i ****" % (mongo_ip, mongo_port))
+    except pymongo.errors.ConnectionFailure, e:
+        logger.critical("**** Could not connect to the Mongo Server %s on port %i ****" % (mongo_ip, mongo_port))
+        logger.error("**** Error %s ****" % (e))
+
+    # Connect to the database
+    db = conn[mongo_db]
+
+    #Connect to the Collection
+    collection = db.flows
+
+    collection.insert(data)
+    logger.info(
+        "**** Flow inserted on the DB for netflow device %s ****" % (data['netflow_device']))
+
+    conn.close()
+
+
+def threaded_flows_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger,
+                      mongo_ip, mongo_port, mongo_username, mongo_password, mongo_db):
+    # Set Up credentials to connect to queue server
+    credentials = pika.PlainCredentials(queue_username, queue_password)
+    # Create connection to Queue Server
+    conn = pika.BlockingConnection(pika.ConnectionParameters(queue_ip, queue_port, queue_virtual_host, credentials))
+    channel = conn.channel()
+
+    # Define the queue
+    channel.queue_declare(queue='flows_queue')
+
+    # Use functools to be able to pass user data to the callback function
+    custom_flows_process = functools.partial(flows_process, logger=logger,
+                                            mongo_ip=mongo_ip,
+                                            mongo_port=mongo_port,
+                                            mongo_username=mongo_username,
+                                            mongo_password=mongo_password,
+                                            mongo_db=mongo_db)
+
+    # Create the consumer with the modified callback function
+    channel.basic_consume(custom_flows_process, queue='flows_queue', no_ack=True)
+
+    logger.info(
+        "**** Starting to consume messages from the queue Flows on thread %s! ****" % threading.currentThread().getName())
 
     channel.start_consuming()
 
@@ -136,16 +239,30 @@ if __name__ == "__main__":
         logger.critical("**** You should specify, the mongo database server ip, port, virtual host, username and password ****")
         sys.exit(1)
 
-    # Get the number of threads configured
+    # Get the number of threads configured for templates
     try:
-        thread_number = config["general"]["db_mongo"]["threads"]
+        thread_number_templates = config["general"]["db_mongo"]["threads_template"]
     except:
-        thread_number = 1
+        thread_number_templates = 1
 
-    threads = []
-    for i in range(thread_number):
-        t = threading.Thread(name="parser_" + str(i+1), target=threaded_mongo_db,
+    threads_templates = []
+    for i in range(thread_number_templates):
+        t = threading.Thread(name="parser_template_" + str(i+1), target=threaded_templates_mongo_db,
                              args=(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger,
                                    mongo_ip, mongo_port, mongo_username, mongo_password, mongo_db))
-        threads.append(t)
+        threads_templates.append(t)
+        t.start()
+
+    # Get the number of threads configured for flows
+    try:
+        thread_number_flows = config["general"]["db_mongo"]["threads_flows"]
+    except:
+        thread_number_flows = 1
+
+    threads_flows = []
+    for i in range(thread_number_flows):
+        t = threading.Thread(name="parser_flows_" + str(i + 1), target=threaded_flows_mongo_db,
+                             args=(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger,
+                                   mongo_ip, mongo_port, mongo_username, mongo_password, mongo_db))
+        threads_flows.append(t)
         t.start()

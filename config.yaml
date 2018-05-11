@@ -11,13 +11,15 @@ general:
       # Possible values for level: debug, info, warning, error, critical
       level: info
     # Number of threads for the parser
-    threads: 1
+    threads: 3
   db_mongo:
     log:
       # Possible values for level: debug, info, warning, error, critical
       level: info
-    # Number of threads for the db_mongo
-    threads: 2
+    # Number of threads for the db_mongo to process templates
+    threads_templates: 2
+    # Number of threads for the db_mongo to process flows
+    threads_flows: 3
 
 # Collector Server Configuration
 collector_server:

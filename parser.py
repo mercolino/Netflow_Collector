@@ -1,5 +1,5 @@
 import pika
-from lib.lib import IP, UDP, Netflow, Flowset, DataTemplate, TemplateFields
+from lib.lib import IP, UDP, Netflow, Flowset, DataTemplate, TemplateFields, DataFlow
 from lib.constants import LEVEL
 import yaml
 import argparse
@@ -8,6 +8,8 @@ import logging
 import functools
 import threading
 import json
+from db_mongo import ReturnTemplate
+import math
 
 
 def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, queue_virtual_host, queue_username,
@@ -36,6 +38,7 @@ def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, que
             # Adding template id and field count to the returning dictionary of the fields
             data_template_doc = template_fields.decoded_fields
             data_template_doc['netflow_device'] = ip_header.src_address
+            data_template_doc['source_id'] = netflow_header.source_id
             data_template_doc['id'] = data_template_header.id
             data_template_doc['count'] = data_template_header.field_count
 
@@ -63,8 +66,9 @@ def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, que
                          udp_header.dst_port,
                          data_template_header.id,
                          data_template_header.field_count))
-            # TODO: Send template document to a queue to be processed by the database module
+
         elif flowset_header.id == 1:
+            # TODO:Process option-Template packets
             logger.info("**** Options-Template Netflow packet version %i from %s:%s to %s:%s with %i flows ****" %
                         (netflow_header.version,
                          ip_header.src_address,
@@ -72,18 +76,63 @@ def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, que
                          ip_header.dst_address,
                          udp_header.dst_port,
                          netflow_header.count))
+
         elif flowset_header.id > 255:
-            logger.info("**** Data Netflow packet version %i from %s:%s to %s:%s with %i flows "
-                        "to be decoded by template %i ****" %
-                        (netflow_header.version,
-                         ip_header.src_address,
-                         udp_header.src_port,
-                         ip_header.dst_address,
-                         udp_header.dst_port,
-                         netflow_header.count,
-                         flowset_header.id))
+            #TODO: Change queue server to permantent messages and manual ack to process data packets at a later time when a template is found
+
+            logger.info(
+                "**** Data Netflow packet version %i from %s:%s to %s:%s with %i flows to be decoded by template %i ****" %
+                (netflow_header.version,
+                 ip_header.src_address,
+                 udp_header.src_port,
+                 ip_header.dst_address,
+                 udp_header.dst_port,
+                 netflow_header.count,
+                 flowset_header.id))
+
+            # Retrieve template from DB
+            template = ReturnTemplate(ip_header.src_address, flowset_header.id, netflow_header.source_id, logger).query_netflow_device
+            # Check if there is a template
+            if template is None:
+                logger.error("**** Netflow Data-Template with id %i for device %s not found ****" %
+                             (flowset_header.id, ip_header.src_address))
+            else:
+                logger.info("**** Netflow Data-Template with id %i for device %s found, data packet sent to decode! ****" %
+                             (flowset_header.id, ip_header.src_address))
+
+                # Add data to flows queue
+                # Set Up credentials to connect to queue server
+                credentials = pika.PlainCredentials(queue_username, queue_password)
+                # Create connection to Queue Server
+                conn = pika.BlockingConnection(
+                    pika.ConnectionParameters(queue_ip, queue_port, queue_virtual_host, credentials))
+                channel = conn.channel()
+                # Define the queue
+                channel.queue_declare(queue='flows_queue')
+
+                # Determine the length in bytes of the template
+                flow_length = 0
+                for key in template['fields']:
+                    flow_length = flow_length + template['fields'][key]['length']
+
+                data = body[52:]
+
+                #Process all the flows in the packet
+                for j in range(netflow_header.count):
+                    logger.info("**** Processing flow %i/%i ****" % (j+1, netflow_header.count))
+                    flow_fields = DataFlow(data[:flow_length], template)
+                    data_flow_doc = flow_fields.decoded_fields
+                    data_flow_doc['netflow_device'] = ip_header.src_address
+                    data_flow_doc['flow_sequence'] = netflow_header.flow_sequence
+                    data_flow_doc['source_id'] = netflow_header.source_id
+
+                    channel.basic_publish(exchange='', routing_key='flows_queue', body=json.dumps(data_flow_doc))
+
+                    data = data[flow_length:]
+
+                conn.close()
         else:
-            logger.info("**** Unknown Netflow packet version %i from %s:%s to %s:%s with %i flows ****" %
+            logger.error("**** Unknown Netflow packet version %i from %s:%s to %s:%s with %i flows ****" %
                         (netflow_header.version,
                          ip_header.src_address,
                          udp_header.src_port,
@@ -91,7 +140,7 @@ def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, que
                          udp_header.dst_port,
                          netflow_header.count))
 
-    print " ".join("%02x" % ord(i) for i in body)
+    #print " ".join("%02x" % ord(i) for i in body)
 
 
 
