@@ -8,6 +8,7 @@ import logging
 import sys
 import threading
 import functools
+import datetime
 
 
 class ReturnTemplate():
@@ -75,24 +76,36 @@ def template_process(ch, method, properties, body, logger, mongo_ip, mongo_port,
     collection = db.templates
 
     # Querying Db to see if the netflow device already have a template
-    query_netflow_device = collection.find({"netflow_device":data['netflow_device'], "source_id":data['source_id']}).count()
+    query_netflow_device = collection.find({"netflow_device": data['netflow_device'], "source_id": data['source_id']}).count()
 
     if query_netflow_device > 0:
         # The Netflow device already have a template on the DB
-        # Checking if the template id alreadyexists, if it doses pass if not insert it
+        # Checking if the template id already exists, if it does, pass, if not, insert it
         query_template_id = collection.find({"netflow_device":data['netflow_device'], "source_id":data['source_id'], "id":data['id']}).count()
         logger.info("**** The netflow device %s already exist on the database ****" % (data['netflow_device']))
         if query_template_id > 0:
             logger.info("**** Template id %i already exist for netflow device %s, template not inserted on the DB****" % (data['id'], data['netflow_device']))
+
+            # Send Ack for the processed template to the template queue
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+
             pass
         else:
             # Insert Template
             collection.insert(data)
+
+            # Send Ack for the processed template to the template queue
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+
             logger.info(
                 "**** Template id %i inserted on the DB for netflow device %s ****" % (data['id'], data['netflow_device']))
     else:
         # the netflow device does not have a template on the database, inserting the one received
         collection.insert(data)
+
+        # Send Ack for the processed template to the template queue
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+
         logger.info(
             "**** Template id %i inserted on the DB for netflow device %s ****" % (data['id'], data['netflow_device']))
 
@@ -119,7 +132,7 @@ def threaded_templates_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_
                                             mongo_db=mongo_db)
 
     # Create the consumer with the modified callback function
-    channel.basic_consume(custom_template_process, queue='template_queue', no_ack=True)
+    channel.basic_consume(custom_template_process, queue='template_queue')
 
     logger.info(
         "**** Starting to consume messages from the queue Template on thread %s! ****" % threading.currentThread().getName())
@@ -129,8 +142,6 @@ def threaded_templates_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_
 
 def flows_process(ch, method, properties, body, logger, mongo_ip, mongo_port, mongo_username, mongo_password,
                      mongo_db):
-
-    # TODO: identify flow and update the record, now all the dflows are recorded on the DB
 
     # Converting json string into dict
     data = json.loads(body)
@@ -149,12 +160,19 @@ def flows_process(ch, method, properties, body, logger, mongo_ip, mongo_port, mo
     # Connect to the database
     db = conn[mongo_db]
 
-    #Connect to the Collection
+    # Connect to the Collection
     collection = db.flows
 
+    # modify string timestamp to datetime object
+    date_object = datetime.datetime.strptime(data['timestamp'], '%Y-%m-%d %H:%M:%S')
+    data['timestamp'] = date_object
+
+    # Insert the data on the DB
     collection.insert(data)
-    logger.info(
-        "**** Flow inserted on the DB for netflow device %s ****" % (data['netflow_device']))
+    logger.info("**** Flow inserted on the DB for netflow device %s ****" % (data['netflow_device']))
+
+    # Send Ack for the processed flow to the flows queue
+    ch.basic_ack(delivery_tag=method.delivery_tag)
 
     conn.close()
 
@@ -179,7 +197,7 @@ def threaded_flows_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_user
                                             mongo_db=mongo_db)
 
     # Create the consumer with the modified callback function
-    channel.basic_consume(custom_flows_process, queue='flows_queue', no_ack=True)
+    channel.basic_consume(custom_flows_process, queue='flows_queue')
 
     logger.info(
         "**** Starting to consume messages from the queue Flows on thread %s! ****" % threading.currentThread().getName())

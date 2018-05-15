@@ -155,7 +155,7 @@ class DataFlow():
             if field_type in constants.IPV4_FIELD:
                 return socket.inet_ntoa(struct.pack(">L", int(word, 16)))
             elif field_type in ["TOS", "TCP_FLAGS"]:
-                return hex(int(word,16))
+                return hex(int(word, 16))
             elif field_type == "PROTOCOL":
                 return constants.PROTOCOLS[int(word, 16)]
             else:

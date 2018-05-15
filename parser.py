@@ -9,7 +9,7 @@ import functools
 import threading
 import json
 from db_mongo import ReturnTemplate
-import math
+import datetime
 
 
 def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, queue_virtual_host, queue_username,
@@ -57,6 +57,9 @@ def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, que
 
             conn.close()
 
+            # Send Ack for the processed template to the template queue
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+
             # Log info
             logger.info("**** Data-Template Netflow packet version %i from %s:%s to %s:%s with template id %i with %i fields****" %
                         (netflow_header.version,
@@ -94,8 +97,10 @@ def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, que
             template = ReturnTemplate(ip_header.src_address, flowset_header.id, netflow_header.source_id, logger).query_netflow_device
             # Check if there is a template
             if template is None:
-                logger.error("**** Netflow Data-Template with id %i for device %s not found ****" %
+                logger.warning("**** Netflow Data-Template with id %i for device %s not found ****" %
                              (flowset_header.id, ip_header.src_address))
+                # Send Reject for the processed flow and requeue
+                ch.basic_reject(delivery_tag=method.delivery_tag, requeue=True)
             else:
                 logger.info("**** Netflow Data-Template with id %i for device %s found, data packet sent to decode! ****" %
                              (flowset_header.id, ip_header.src_address))
@@ -122,6 +127,8 @@ def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, que
                     logger.info("**** Processing flow %i/%i ****" % (j+1, netflow_header.count))
                     flow_fields = DataFlow(data[:flow_length], template)
                     data_flow_doc = flow_fields.decoded_fields
+                    data_flow_doc['timestamp'] = datetime.datetime.fromtimestamp(netflow_header.timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                    data_flow_doc['version'] = netflow_header.version
                     data_flow_doc['netflow_device'] = ip_header.src_address
                     data_flow_doc['flow_sequence'] = netflow_header.flow_sequence
                     data_flow_doc['source_id'] = netflow_header.source_id
@@ -131,6 +138,9 @@ def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, que
                     data = data[flow_length:]
 
                 conn.close()
+
+                # Send Ack for the processed flow to the flows queue
+                ch.basic_ack(delivery_tag=method.delivery_tag)
         else:
             logger.error("**** Unknown Netflow packet version %i from %s:%s to %s:%s with %i flows ****" %
                         (netflow_header.version,
@@ -163,7 +173,7 @@ def threaded_parser(queue_ip, queue_port, queue_virtual_host, queue_username, qu
                                             queue_password=queue_password)
 
     # Create the consumer with the modified callback function
-    channel.basic_consume(custom_parse_packet, queue='raw_msg_queue', no_ack=True)
+    channel.basic_consume(custom_parse_packet, queue='raw_msg_queue')
 
     logger.info("**** Starting to consume messages from the queue Raw Msg on thread %s! ****" % threading.currentThread().getName())
 
@@ -219,7 +229,7 @@ if __name__ == "__main__":
 
     threads = []
     for i in range(thread_number):
-        t = threading.Thread(name="parser_" + str(i+1),target=threaded_parser,
+        t = threading.Thread(name="parser_" + str(i+1), target=threaded_parser,
                              args=(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger))
         threads.append(t)
         t.start()

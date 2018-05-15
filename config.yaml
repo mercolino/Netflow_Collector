@@ -19,7 +19,7 @@ general:
     # Number of threads for the db_mongo to process templates
     threads_templates: 2
     # Number of threads for the db_mongo to process flows
-    threads_flows: 3
+    threads_flows: 5
 
 # Collector Server Configuration
 collector_server:
