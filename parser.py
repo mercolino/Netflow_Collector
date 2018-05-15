@@ -94,13 +94,38 @@ def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, que
                  flowset_header.id))
 
             # Retrieve template from DB
-            template = ReturnTemplate(ip_header.src_address, flowset_header.id, netflow_header.source_id, logger).query_netflow_device
+            find_template = ReturnTemplate(ip_header.src_address, flowset_header.id, netflow_header.source_id, logger)
+            template = find_template.query_netflow_device
+            min_template = find_template.min_template_id
+
+
             # Check if there is a template
             if template is None:
                 logger.warning("**** Netflow Data-Template with id %i for device %s not found ****" %
                              (flowset_header.id, ip_header.src_address))
-                # Send Reject for the processed flow and requeue
-                ch.basic_reject(delivery_tag=method.delivery_tag, requeue=True)
+
+                # Check if there are templates with the source id and ip src, if not requeue the message
+                if min_template is not None:
+                    # If there are templates for the source id and ip src address, check if the min template id is
+                    # greater than the template needed, this means that this flows are orphan, the router will not send
+                    # the required tempalte and the message is marked for deletion, if not then requeue the message
+                    min_template_id = min_template['id']
+                    if flowset_header.id < min_template_id:
+                        # Send Reject for the processed flow and delete
+                        ch.basic_reject(delivery_tag=method.delivery_tag, requeue=False)
+                        logger.info("**** Netflow Data-Template with id %i for device %s not found and min template is %i, flow marked for deletion****" %
+                                       (flowset_header.id, ip_header.src_address, min_template_id))
+                    else:
+                        # Send Reject for the processed flow and requeue
+                        ch.basic_reject(delivery_tag=method.delivery_tag, requeue=True)
+                        logger.info(
+                            "**** Netflow Data-Template with id %i for device %s not found flow marked for requeue****" %
+                            (flowset_header.id, ip_header.src_address))
+                else:
+                    # Send Reject for the processed flow and requeue
+                    ch.basic_reject(delivery_tag=method.delivery_tag, requeue=True)
+                    logger.info("**** Netflow Data-Template with id %i for device %s not found flow marked for requeue****" %
+                                   (flowset_header.id, ip_header.src_address))
             else:
                 logger.info("**** Netflow Data-Template with id %i for device %s found, data packet sent to decode! ****" %
                              (flowset_header.id, ip_header.src_address))

@@ -49,6 +49,10 @@ class ReturnTemplate():
         self.query_netflow_device = collection.find_one({"netflow_device": netflow_device, "source_id":source_id,
                                                          "id": template_id})
 
+        # Querying Db to see if the netflow device already have a template
+        self.min_template_id = collection.find_one({"netflow_device": netflow_device, "source_id": source_id},
+                                               sort=[("id", pymongo.ASCENDING)])
+
         conn.close()
 
 
