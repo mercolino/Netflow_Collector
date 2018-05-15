@@ -9,7 +9,7 @@ import logging
 import pika
 
 
-def process_data(data, udp_ip, queue_ip, queue_port, username, password, queue_virtual_host, logger):
+def process_data(data, udp_ip, queue_ip, queue_port, username, password, queue_virtual_host, logger, message_durability):
 
     # Process IP Header
     ip_header = IP(data[0:20])
@@ -25,9 +25,14 @@ def process_data(data, udp_ip, queue_ip, queue_port, username, password, queue_v
             channel = conn.channel()
 
             # Define the queue
-            channel.queue_declare(queue='raw_msg_queue')
+            channel.queue_declare(queue='raw_msg_queue', durable=message_durability)
 
-            channel.basic_publish(exchange='', routing_key='raw_msg_queue', body=data)
+            if message_durability:
+                channel.basic_publish(exchange='', routing_key='raw_msg_queue', body=data,
+                                  properties=pika.BasicProperties(delivery_mode=2))
+            else:
+                channel.basic_publish(exchange='', routing_key='raw_msg_queue', body=data)
+
             logger.info("**** Message sent to queue! | %s:%s -> %s:%s ****" % (ip_header.src_address,
                                                                                udp_header.src_port,
                                                                                ip_header.dst_address,
@@ -94,6 +99,12 @@ if __name__ == "__main__":
     except:
         udp_buffer = 4096
 
+    # Message Durability is enabled?
+    try:
+        message_durability = config["queue_server"]["message_durability"]
+    except:
+        message_durability = False
+
     # Create the raw socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_RAW)
 
@@ -111,6 +122,7 @@ if __name__ == "__main__":
         data, addr = server_socket.recvfrom(udp_buffer)
         logger.info("Connection received from %s, the socket was dispatched to the thread" % addr[0])
         t = threading.Thread(target=process_data, args=(data, udp_ip, queue_ip, queue_port,
-                                                        queue_username, queue_password, queue_virtual_host, logger))
+                                                        queue_username, queue_password, queue_virtual_host, logger,
+                                                        message_durability))
         t.start()
 

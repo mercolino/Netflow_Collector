@@ -13,7 +13,7 @@ import datetime
 
 
 def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, queue_virtual_host, queue_username,
-                 queue_password):
+                 queue_password, message_durability):
 
     logger.info("**** Message retrieved from the queue on thread %s!****" % (threading.currentThread().getName()))
 
@@ -51,9 +51,13 @@ def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, que
             channel = conn.channel()
 
             # Define the queue
-            channel.queue_declare(queue='template_queue')
+            channel.queue_declare(queue='template_queue', durable=message_durability)
 
-            channel.basic_publish(exchange='', routing_key='template_queue', body=json.dumps(data_template_doc))
+            if message_durability:
+                channel.basic_publish(exchange='', routing_key='template_queue', body=json.dumps(data_template_doc),
+                                      properties=pika.BasicProperties(delivery_mode=2))
+            else:
+                channel.basic_publish(exchange='', routing_key='template_queue', body=json.dumps(data_template_doc))
 
             conn.close()
 
@@ -138,7 +142,7 @@ def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, que
                     pika.ConnectionParameters(queue_ip, queue_port, queue_virtual_host, credentials))
                 channel = conn.channel()
                 # Define the queue
-                channel.queue_declare(queue='flows_queue')
+                channel.queue_declare(queue='flows_queue', durable=message_durability)
 
                 # Determine the length in bytes of the template
                 flow_length = 0
@@ -158,7 +162,11 @@ def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, que
                     data_flow_doc['flow_sequence'] = netflow_header.flow_sequence
                     data_flow_doc['source_id'] = netflow_header.source_id
 
-                    channel.basic_publish(exchange='', routing_key='flows_queue', body=json.dumps(data_flow_doc))
+                    if message_durability:
+                        channel.basic_publish(exchange='', routing_key='flows_queue', body=json.dumps(data_flow_doc),
+                                              properties=pika.BasicProperties(delivery_mode=2))
+                    else:
+                        channel.basic_publish(exchange='', routing_key='flows_queue', body=json.dumps(data_flow_doc))
 
                     data = data[flow_length:]
 
@@ -179,7 +187,7 @@ def parse_packet(ch, method, properties, body, logger, queue_ip, queue_port, que
 
 
 
-def threaded_parser(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger):
+def threaded_parser(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger, message_durability):
     # Set Up credentials to connect to queue server
     credentials = pika.PlainCredentials(queue_username, queue_password)
     # Create connection to Queue Server
@@ -187,7 +195,7 @@ def threaded_parser(queue_ip, queue_port, queue_virtual_host, queue_username, qu
     channel = conn.channel()
 
     # Define the queue
-    channel.queue_declare(queue='raw_msg_queue')
+    channel.queue_declare(queue='raw_msg_queue', durable=message_durability)
 
     # Use functools to be able to pass user data to the callback function
     custom_parse_packet = functools.partial(parse_packet, logger=logger,
@@ -195,7 +203,8 @@ def threaded_parser(queue_ip, queue_port, queue_virtual_host, queue_username, qu
                                             queue_port=queue_port,
                                             queue_virtual_host=queue_virtual_host,
                                             queue_username=queue_username,
-                                            queue_password=queue_password)
+                                            queue_password=queue_password,
+                                            message_durability=message_durability)
 
     # Create the consumer with the modified callback function
     channel.basic_consume(custom_parse_packet, queue='raw_msg_queue')
@@ -252,9 +261,16 @@ if __name__ == "__main__":
     except:
         thread_number = 1
 
+    # Message Durability is enabled?
+    try:
+        message_durability = config["queue_server"]["message_durability"]
+    except:
+        message_durability = False
+
     threads = []
     for i in range(thread_number):
         t = threading.Thread(name="parser_" + str(i+1), target=threaded_parser,
-                             args=(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger))
+                             args=(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger,
+                                   message_durability))
         threads.append(t)
         t.start()

@@ -12,11 +12,6 @@ general:
       level: info
     # Number of threads for the parser
     threads: 3
-    # Timeout in minutes for flow messages in the queue that were not processed and are stuck on the queue
-    #timeout: 10
-    # TimeZone to calculate the timeout, it is important that the timezone of the routers and the server is the same, it is
-    # recommended to use UTC
-    #flow_timezone: America/Denver
   db_mongo:
     log:
       # Possible values for level: debug, info, warning, error, critical
@@ -39,6 +34,7 @@ queue_server:
   username: netflow
   password: netflow
   virtual_host: /
+  message_durability: true
 
 # Mongo DB Configuration
 mongo_server:

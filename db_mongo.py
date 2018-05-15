@@ -57,7 +57,7 @@ class ReturnTemplate():
 
 
 def template_process(ch, method, properties, body, logger, mongo_ip, mongo_port, mongo_username, mongo_password,
-                     mongo_db):
+                     mongo_db, message_durability):
 
     # Converting json string into dict
     data = json.loads(body)
@@ -117,7 +117,7 @@ def template_process(ch, method, properties, body, logger, mongo_ip, mongo_port,
 
 
 def threaded_templates_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger,
-                      mongo_ip, mongo_port, mongo_username, mongo_password, mongo_db):
+                      mongo_ip, mongo_port, mongo_username, mongo_password, mongo_db, message_durability):
     # Set Up credentials to connect to queue server
     credentials = pika.PlainCredentials(queue_username, queue_password)
     # Create connection to Queue Server
@@ -125,7 +125,7 @@ def threaded_templates_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_
     channel = conn.channel()
 
     # Define the queue
-    channel.queue_declare(queue='template_queue')
+    channel.queue_declare(queue='template_queue', durable=message_durability)
 
     # Use functools to be able to pass user data to the callback function
     custom_template_process = functools.partial(template_process, logger=logger,
@@ -133,7 +133,8 @@ def threaded_templates_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_
                                             mongo_port=mongo_port,
                                             mongo_username=mongo_username,
                                             mongo_password=mongo_password,
-                                            mongo_db=mongo_db)
+                                            mongo_db=mongo_db,
+                                            message_durability=message_durability)
 
     # Create the consumer with the modified callback function
     channel.basic_consume(custom_template_process, queue='template_queue')
@@ -145,7 +146,7 @@ def threaded_templates_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_
 
 
 def flows_process(ch, method, properties, body, logger, mongo_ip, mongo_port, mongo_username, mongo_password,
-                     mongo_db):
+                     mongo_db, message_durability):
 
     # Converting json string into dict
     data = json.loads(body)
@@ -182,7 +183,7 @@ def flows_process(ch, method, properties, body, logger, mongo_ip, mongo_port, mo
 
 
 def threaded_flows_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger,
-                      mongo_ip, mongo_port, mongo_username, mongo_password, mongo_db):
+                      mongo_ip, mongo_port, mongo_username, mongo_password, mongo_db, message_durability):
     # Set Up credentials to connect to queue server
     credentials = pika.PlainCredentials(queue_username, queue_password)
     # Create connection to Queue Server
@@ -190,7 +191,7 @@ def threaded_flows_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_user
     channel = conn.channel()
 
     # Define the queue
-    channel.queue_declare(queue='flows_queue')
+    channel.queue_declare(queue='flows_queue', durable=message_durability)
 
     # Use functools to be able to pass user data to the callback function
     custom_flows_process = functools.partial(flows_process, logger=logger,
@@ -198,7 +199,8 @@ def threaded_flows_mongo_db(queue_ip, queue_port, queue_virtual_host, queue_user
                                             mongo_port=mongo_port,
                                             mongo_username=mongo_username,
                                             mongo_password=mongo_password,
-                                            mongo_db=mongo_db)
+                                            mongo_db=mongo_db,
+                                            message_durability=message_durability)
 
     # Create the consumer with the modified callback function
     channel.basic_consume(custom_flows_process, queue='flows_queue')
@@ -261,6 +263,12 @@ if __name__ == "__main__":
         logger.critical("**** You should specify, the mongo database server ip, port, virtual host, username and password ****")
         sys.exit(1)
 
+    # Message Durability is enabled?
+    try:
+        message_durability = config["queue_server"]["message_durability"]
+    except:
+        message_durability = False
+
     # Get the number of threads configured for templates
     try:
         thread_number_templates = config["general"]["db_mongo"]["threads_template"]
@@ -271,7 +279,7 @@ if __name__ == "__main__":
     for i in range(thread_number_templates):
         t = threading.Thread(name="parser_template_" + str(i+1), target=threaded_templates_mongo_db,
                              args=(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger,
-                                   mongo_ip, mongo_port, mongo_username, mongo_password, mongo_db))
+                                   mongo_ip, mongo_port, mongo_username, mongo_password, mongo_db, message_durability))
         threads_templates.append(t)
         t.start()
 
@@ -285,6 +293,6 @@ if __name__ == "__main__":
     for i in range(thread_number_flows):
         t = threading.Thread(name="parser_flows_" + str(i + 1), target=threaded_flows_mongo_db,
                              args=(queue_ip, queue_port, queue_virtual_host, queue_username, queue_password, logger,
-                                   mongo_ip, mongo_port, mongo_username, mongo_password, mongo_db))
+                                   mongo_ip, mongo_port, mongo_username, mongo_password, mongo_db, message_durability))
         threads_flows.append(t)
         t.start()
